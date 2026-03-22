@@ -1,0 +1,20 @@
+{
+  "rules": [
+    {
+      "id": "api-key.openai",
+      "action": "redact"
+    },
+    {
+      "id": "code.eval",
+      "action": "block"
+    },
+    {
+      "id": "custom.aws-access-key",
+      "category": "secret",
+      "severity": "high",
+      "action": "redact",
+      "pattern": "AKIA[0-9A-Z]{16}",
+      "enabled": true
+    }
+  ]
+}
