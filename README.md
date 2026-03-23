@@ -2,223 +2,192 @@
 
 CAST = Continuous-on-Authoring Security Testing.
 
-Cencurity Engine is a streaming security engine for AI-generated full-stack code. It sits inline between an application layer and an LLM API, inspects code while it is being written, and enforces `allow`, `redact`, or `block` before unsafe output reaches the developer.
+Cencurity Engine is a local guardrail server for AI coding tools.
 
-Security while code is being written — not after it is already delivered.
+It sits between your IDE and the model provider.
 
-## The problem
+When the model sends code back, Cencurity Engine checks that output right away and can:
 
-AI coding tools now generate backend code, frontend code, agent workflows, and config files in the same authoring loop.
+- pass safe output through
+- hide sensitive output with `redact`
+- stop dangerous output with `block`
 
-That changes the security problem:
+## Start here
 
-- risky code appears during generation, not only after commit
-- generated output can contain backend vulnerabilities, frontend sink misuse, unsafe tool execution, or inline credentials
-- post-generation scanning is useful, but it happens after the code has already been delivered to the developer
+If you only remember one thing, remember this:
 
-## The solution
+**keep your API key in your IDE, run Cencurity Engine locally, and point your IDE to `http://localhost:8080`.**
 
-Cencurity Engine controls generation itself.
-
-- it watches streamed model output in real time
-- it detects high-signal misuse patterns as code is produced
-- it applies `allow`, `redact`, or `block` inline
-- it preserves framework-aware metadata so findings are explainable as product signals, not only regex hits
-
-In short: we don't scan code after generation; we control generation while it is happening.
-
-## How it works
-
-1. An application layer, agent runtime, or thin client sends a request through Cencurity Engine.
-2. Cencurity Engine intercepts the SSE stream chunk by chunk.
-3. It combines a sliding buffer, accumulated code-unit analysis, and framework-aware profiles.
-4. It classifies findings and enforces the strongest action before forwarding output.
-
-This makes security a generation-time control, not only a post-scan report.
-
-## CAST vs SAST
-
-| Model | When it runs | Primary goal | Typical output |
-| --- | --- | --- | --- |
-| `CAST` | while code is being written by the model | control unsafe generation before delivery | allow / redact / block in the stream |
-| `SAST` | after code exists | analyze a codebase for vulnerabilities | findings after generation |
-| `DAST` | against a running app | test exposed runtime behavior | runtime issues after deployment or staging |
-| `IAST` | inside an instrumented app | observe runtime execution paths | internal runtime findings |
-
-The point is not that CAST replaces SAST. The point is that CAST covers a different control moment: security while code is being written.
-
-## Product architecture
-
-Cencurity Engine is organized as a tiered CAST architecture so the product can cover AI-generated full-stack code honestly without pretending every ecosystem has equal depth.
-
-### Engine-centered flow
-
-`application / agent / optional thin client -> Cencurity Engine -> LLM`
-
-The engine is the product. Any UI integration, workflow connector, or agent-side adapter is an optional outer layer, not the core system.
-
-### Tier map
-
-| Tier | Role in the product | Profiles | Typical action pattern |
-| --- | --- | --- | --- |
-| `Universal Guard` | cross-cutting controls for generated artifacts regardless of framework | `JSON`, `YAML`, config-like payloads, secrets, tokens, dangerous command payloads | detect / redact / block |
-| `Deep Profiles` | strongest framework-aware coverage with accumulated stream enforcement | `Express`, `FastAPI`, `Next.js`, `LangGraph` | block high-confidence framework misuse |
-| `Medium Profiles` | first-pass framework-aware coverage for common full-stack and agent ecosystems | `React`, `Django`, `Flask`, `LangChain` | detect and block, with policy flexibility for redaction flows |
-| `Light Profiles` | lightweight first-pass coverage for adjacent AI-generated stacks | `Vue`, `Tailwind`, `Pandas`, `NumPy`, `TensorFlow`, `PyTorch` | detect obvious high-signal misuse |
-
-### Architecture view
-
-- Core engine
-	- streaming interception and enforcement
-	- framework-aware analysis
-	- policy decision layer
-	- metadata-rich findings
-- Universal Guard
-	- inline secrets and credentials
-	- dangerous config payloads
-	- download-exec and encoded suspicious command strings
-- Deep Profiles
-	- `Express`
-	- `FastAPI`
-	- `Next.js`
-	- `LangGraph`
-- Medium Profiles
-	- `React`
-	- `Django` / `Flask`
-	- `LangChain`
-- Light Profiles
-	- `Vue`
-	- `Tailwind`
-	- `Pandas` / `NumPy`
-	- `TensorFlow` / `PyTorch`
-
-Why this structure works:
-
-- the product goes deepest where AI-generated risk is common and commercially valuable now
-- it still covers the rest of the AI-generated stack with honest first-pass protection
-- it keeps the message clear: full-stack coverage, tiered by depth
-
-## Representative demos and use-cases
-
-These are the product stories Cencurity is designed to tell.
-
-### Express: auth/session misuse → block
-
-- Example misuse: `jwt.decode(req.headers.authorization)`, insecure `express-session`, request-driven session state, role/admin decisions from headers or query params
-- Product message: generated Node.js backend code is controlled before unsafe auth/session logic reaches the developer
-- Expected demo outcome: `block`
-
-| input | finding | action |
-| --- | --- | --- |
-| `const user = jwt.decode(req.headers.authorization)` | `cast.express.jwt-decode-auth-header` | `block` |
-
-### FastAPI: JWT/CORS misuse → block
-
-- Example misuse: `jwt.decode(..., options={'verify_signature': False})`, wildcard CORS plus credentials, request-controlled fetch and database usage
-- Product message: generated Python API code gets framework-aware enforcement, not only generic secret scanning
-- Expected demo outcome: `block`
-
-| input | finding | action |
-| --- | --- | --- |
-| `jwt.decode(token, options={"verify_signature": False})` | `cast.fastapi.jwt-no-verify` | `block` |
-
-### React / Next.js: dangerous HTML and route trust handling
-
-- Example misuse: `dangerouslySetInnerHTML`, route-level trust of `headers()`, `cookies()`, or `searchParams`, server action redirect/auth misuse, public env secret exposure
-- Product message: Cencurity is not backend-only; it understands generated frontend and full-stack web output, and `Next.js` now has deep route/server-action coverage
-- Expected demo outcome: built-in high-severity findings typically `block`; React remains first-pass while `Next.js` supports deeper framework-aware enforcement
-
-| input | finding | action |
-| --- | --- | --- |
-| `await fetch(headers().get("x-url")!)` | `cast.nextjs.route.fetch-direct-input` | `block` |
-
-### LangChain / LangGraph: unsafe tool usage and graph control misuse → block
-
-- Example misuse: tool input passed to `subprocess.run`, state- or messages-derived execution, `ToolNode` flows on untrusted state, file or command execution built from prompt/state values
-- Product message: agent and automation code is treated as application logic, not ignored as “just orchestration”; `LangGraph` now has deep graph/state-aware coverage
-- Expected demo outcome: `block`
-
-| input | finding | action |
-| --- | --- | --- |
-| `return Command(goto=state["next_step"])` | `cast.langgraph.command-goto-from-input` | `block` |
-
-### JSON / YAML / config: dangerous config → detect
-
-- Example misuse: inline API keys, tokens, YAML `run:` or `script:` entries with `curl | sh`, encoded payload strings
-- Product message: Cencurity controls generated config and automation artifacts, not only `.js` and `.py` files
-- Expected demo outcome: `detect`, then `redact` or `block` depending on rule category and policy
-
-## Finding taxonomy
-
-Every CAST finding carries product-facing metadata so detections are explainable and can be surfaced cleanly in logs, policy, and demos.
-
-| Field | Meaning | Example |
-| --- | --- | --- |
-| `language` | generated code language family | `python`, `javascript`, `typescript`, `json`, `yaml` |
-| `framework` | matched profile or artifact class | `fastapi`, `express`, `nextjs`, `langchain`, `json-config` |
-| `rule_id` | stable finding identifier | `cast.fastapi.auth.jwt-verify-disabled` |
-| `severity` | relative impact level | `high` |
-| `confidence` | confidence assigned by the analyzer | `high` |
-| `action` | enforcement decision source | `allow`, `redact`, `block` |
-| `evidence` | matched or extracted evidence snippet | `jwt.decode(token, options={'verify_signature': False})` |
-
-### Representative finding examples
-
-| Rule ID | Language | Framework | Meaning | Default action |
-| --- | --- | --- | --- | --- |
-| `cast.express.auth.jwt-decode` | `javascript` | `express` | request auth built from unverified JWT decode | `block` |
-| `cast.fastapi.security.cors-wildcard-credentials` | `python` | `fastapi` | insecure wildcard CORS plus credentials | `block` |
-| `cast.nextjs.route.auth-from-input` | `typescript` | `nextjs` | route auth/admin decision from request-controlled values | `block` |
-| `cast.react.xss` | `javascript` | `react` | dangerous raw HTML sink with user-controlled input | `block` |
-| `cast.langchain.tool.exec-from-input` | `python` | `langchain` | tool path converts user-like input into command execution | `block` |
-| `cast.json.secret.inline` | `json` | `json-config` | credential embedded directly in generated config | `redact` |
+Most users do **not** need to copy their provider API key into Cencurity Engine.
 
 ## Quickstart
 
-The fastest way to understand the product is: run Cencurity Engine, route model traffic through it, then trigger a known allow / redact / block scenario.
+This is the normal user setup.
 
-### 1) Start the CAST proxy
+### 1) Start the server
 
-Normal product usage does not require the engine to store the upstream API key.
+Choose the upstream provider you want to use, then run Cencurity Engine.
 
-In the common setup, your IDE or coding platform already owns the upstream API key. Cencurity Engine just sits in the middle and forwards the normal `Authorization` header upstream.
-
-PowerShell:
+OpenAI-compatible example:
 
 ```powershell
-$env:OPENAI_API_BASE_URL = "https://api.openai.com"
-$env:CENCURITY_POLICY_FILE = ".\cast.rules.example.json"
 go run ./cmd/cast serve --listen :8080 --upstream https://api.openai.com --policy .\cast.rules.example.json
 ```
 
-### 2) Point your IDE, CLI, or coding platform at the engine
+Other examples:
 
-- endpoint: keep the same upstream API path, now routed through the engine, for example `http://localhost:8080/v1/chat/completions`, `http://localhost:8080/v1/messages`, or Gemini `.../v1beta/models/{model}:streamGenerateContent`
-- auth header: keep sending your normal upstream bearer token
-- protocol: OpenAI-compatible streaming, Anthropic Messages streaming, and Gemini streaming REST are supported
+```powershell
+go run ./cmd/cast serve --listen :8080 --upstream https://api.anthropic.com --policy .\cast.rules.example.json
+go run ./cmd/cast serve --listen :8080 --upstream https://api.deepseek.com --policy .\cast.rules.example.json
+go run ./cmd/cast serve --listen :8080 --upstream https://api.x.ai --policy .\cast.rules.example.json
+```
 
-Optional workflow integrations can sit on top of this endpoint, but they are not the product boundary.
+When it starts, it listens on `http://localhost:8080`.
 
-### 3) Run a quick sanity check
+### 2) Keep your API key where it already is
+
+In the normal setup:
+
+- your IDE or coding client already has the provider API key
+- Cencurity Engine forwards that auth header upstream
+- you do not need to store the key in Cencurity Engine
+
+### 3) Point your IDE at Cencurity Engine
+
+Change the model base URL from the provider URL to:
+
+```text
+http://localhost:8080
+```
+
+Keep using the same provider path style.
+
+Examples:
+
+- OpenAI-compatible chat completions: `http://localhost:8080/v1/chat/completions`
+- Anthropic Messages: `http://localhost:8080/v1/messages`
+- Gemini streaming REST: `http://localhost:8080/v1beta/models/{model}:streamGenerateContent`
+
+### 4) Use your IDE normally
+
+After that, use your IDE like normal.
+
+Cencurity Engine sits in the middle and decides:
+
+- safe output → `allow`
+- sensitive output → `redact`
+- dangerous output → `block`
+
+### 5) Check that it is running
 
 ```powershell
 go run ./cmd/cast doctor
 go run ./cmd/cast version
 ```
 
-### 4) Test the control flow
+You can also open:
 
-- use an `allow` prompt to confirm normal pass-through
-- use a secret-like output to confirm `redact`
-- use an unsafe code prompt to confirm `block`
+- [http://localhost:8080/healthz](http://localhost:8080/healthz)
+- [http://localhost:8080/metrics](http://localhost:8080/metrics)
 
-If you are testing with `curl` instead of an IDE, send the bearer token in the request header at call time.
+## Quick answers
+
+### Do I need to put my API key into Cencurity Engine?
+
+No, usually not.
+
+The usual setup is:
+
+- API key stays in your IDE or client
+- Cencurity Engine forwards that auth header upstream
+
+### What do most users actually do?
+
+Most users only do this:
+
+```powershell
+go run ./cmd/cast serve --listen :8080 --upstream https://api.openai.com --policy .\cast.rules.example.json
+```
+
+Then they change their IDE base URL to:
+
+```text
+http://localhost:8080
+```
+
+That is the main user flow.
+
+## Product overview
+
+### CAST vs SAST
+
+| Model | When it runs | Main job | Typical result |
+| --- | --- | --- | --- |
+| `CAST` | while the model is still writing code | stop unsafe output before it reaches the developer | `allow`, `redact`, `block` |
+| `SAST` | after code already exists | scan code for vulnerabilities | findings after generation |
+| `DAST` | against a running app | test runtime behavior | runtime issues after deployment or staging |
+| `IAST` | inside an instrumented app | watch real execution paths | internal runtime findings |
+
+The point is not that CAST replaces SAST.
+
+The point is that CAST protects a different moment: **while code is being generated**.
+
+### Tier map
+
+| Tier | What it covers | Typical behavior |
+| --- | --- | --- |
+| `Universal Guard` | secrets, tokens, JSON, YAML, config-like payloads, dangerous command strings | detect / redact / block |
+| `Deep Profiles` | `Express`, `FastAPI`, `Next.js`, `LangGraph` | strongest framework-aware blocking |
+| `Medium Profiles` | `React`, `Django`, `Flask`, `LangChain` | detect and block common high-signal misuse |
+| `Light Profiles` | `Vue`, `Tailwind`, `Pandas`, `NumPy`, `TensorFlow`, `PyTorch` | first-pass protection for obvious risky output |
+
+### Example outcomes
+
+| Example | What Cencurity Engine does |
+| --- | --- |
+| model outputs normal code | `allow` |
+| model outputs a secret or token | `redact` |
+| model outputs dangerous code like `eval(...)` | `block` |
+
+### Finding fields
+
+| Field | Meaning | Example |
+| --- | --- | --- |
+| `language` | code language family | `python` |
+| `framework` | matched framework or artifact class | `fastapi` |
+| `rule_id` | stable detection ID | `cast.fastapi.auth.jwt-verify-disabled` |
+| `severity` | impact level | `high` |
+| `confidence` | confidence score | `high` |
+| `action` | enforcement result | `block` |
+| `evidence` | matched evidence snippet | `eval(user_input)` |
+
+## What this tool does
+
+Cencurity Engine checks model output while it is being generated.
+
+That matters because unsafe code can appear before it is ever pasted into a file.
+
+## Simple examples
+
+- unsafe secret in output → `redact`
+- dangerous code like `eval(...)` → `block`
+- normal code output → `allow`
+
+## If you want to test with curl
+
+If you are testing with `curl` instead of an IDE, send the upstream token in the request header at call time.
 
 ## CLI flow
 
 ### `cast serve`
 
-Starts the inline CAST proxy. In the normal setup, clients keep owning their upstream API keys and Cencurity Engine forwards the incoming `Authorization` header.
+Starts the local Cencurity Engine server.
+
+Normal setup:
+
+- your IDE keeps the API key
+- Cencurity Engine forwards the auth header upstream
+- you point the IDE at `http://localhost:8080`
 
 ```powershell
 go run ./cmd/cast serve --listen :8080 --upstream https://api.openai.com --policy .\cast.rules.example.json
@@ -291,6 +260,10 @@ When the file changes, active rules reload automatically on the next access afte
 - `CENCURITY_HEALTH_PATH`: health endpoint path, default `/healthz`
 - `CENCURITY_METRICS_PATH`: metrics endpoint path, default `/metrics`
 - `CENCURITY_LOG_LEVEL`: `debug`, `info`, `warn`, or `error`
+
+For most users, the only required step is to run `cast serve` and point the IDE or coding client at `http://localhost:8080`.
+
+Most users do **not** need to set `OPENAI_API_KEY` in the engine.
 
 ## Streaming tests
 
