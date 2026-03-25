@@ -1,3 +1,7 @@
+<p align="center">
+	<img src="./4444.png" alt="Cencurity Engine banner" width="100%" />
+</p>
+
 # Cencurity Engine
 
 CAST = Continuous-on-Authoring Security Testing.
