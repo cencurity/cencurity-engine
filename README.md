@@ -6,35 +6,34 @@ Cencurity Engine is a local guardrail server for AI coding tools.
 
 It sits between your IDE and the model provider.
 
-When the model sends code back, Cencurity Engine checks that output right away and can:
+It can:
 
 - pass safe output through
 - hide sensitive output with `redact`
 - stop dangerous output with `block`
 
-## Start here
-
-If you only remember one thing, remember this:
-
-**keep your API key in your IDE, run Cencurity Engine locally, and point your IDE to `http://localhost:8080`.**
-
-Most users do **not** need to copy their provider API key into Cencurity Engine.
-
 ## Quickstart
 
-This is the normal user setup.
+This is the ultra-simple user flow.
 
-### 1) Start the server
+### Ultra-simple version
 
-Choose the upstream provider you want to use, then run Cencurity Engine.
-
-OpenAI-compatible example:
+1. Keep your provider API key in your IDE or coding client
+2. Open a terminal in this repository
+3. Start the engine:
 
 ```powershell
-go run ./cmd/cast serve --listen :8080 --upstream https://api.openai.com --policy .\cast.rules.example.json
+go run ./cmd/cast serve --listen :8080 --upstream https://your-llm-base-url --policy .\cast.rules.example.json
 ```
 
-Other examples:
+4. Change your IDE base URL to `http://localhost:8080`
+5. Keep using your IDE like normal
+
+Replace `https://your-llm-base-url` with your real provider base URL.
+
+`cast.rules.example.json` is the normal starter policy file in this repo, not a mock-test-only file.
+
+Other provider examples:
 
 ```powershell
 go run ./cmd/cast serve --listen :8080 --upstream https://api.anthropic.com --policy .\cast.rules.example.json
@@ -42,80 +41,43 @@ go run ./cmd/cast serve --listen :8080 --upstream https://api.deepseek.com --pol
 go run ./cmd/cast serve --listen :8080 --upstream https://api.x.ai --policy .\cast.rules.example.json
 ```
 
-When it starts, it listens on `http://localhost:8080`.
+What this command does:
 
-### 2) Keep your API key where it already is
+- starts the local Cencurity Engine server on port `8080`
+- forwards your IDE requests to the provider in `--upstream`
+- applies the policy in `cast.rules.example.json` before traffic leaves your machine
 
-In the normal setup:
+### Main local URLs
 
-- your IDE or coding client already has the provider API key
+- Engine base URL: `http://localhost:8080`
+- Health check: [http://localhost:8080/healthz](http://localhost:8080/healthz)
+- Metrics: [http://localhost:8080/metrics](http://localhost:8080/metrics)
+
+### What this means in practice
+
+- your IDE keeps the API key
 - Cencurity Engine forwards that auth header upstream
-- you do not need to store the key in Cencurity Engine
+- your IDE sends model traffic to `http://localhost:8080`
+- Cencurity Engine sits in the middle before traffic reaches the provider
 
-### 3) Point your IDE at Cencurity Engine
-
-Change the model base URL from the provider URL to:
-
-```text
-http://localhost:8080
-```
-
-Keep using the same provider path style.
-
-Examples:
+### Provider path examples
 
 - OpenAI-compatible chat completions: `http://localhost:8080/v1/chat/completions`
 - Anthropic Messages: `http://localhost:8080/v1/messages`
 - Gemini streaming REST: `http://localhost:8080/v1beta/models/{model}:streamGenerateContent`
 
-### 4) Use your IDE normally
+### Quick answers
 
-After that, use your IDE like normal.
+- Do I need to put my API key into Cencurity Engine? No, usually not.
+- What do most users do? Start the server, then point the IDE base URL to `http://localhost:8080`.
+- What happens if I do not change the IDE base URL? Your traffic keeps going directly to the provider.
 
-Cencurity Engine sits in the middle and decides:
-
-- safe output → `allow`
-- sensitive output → `redact`
-- dangerous output → `block`
-
-### 5) Check that it is running
+### Optional checks
 
 ```powershell
 go run ./cmd/cast doctor
 go run ./cmd/cast version
 ```
-
-You can also open:
-
-- [http://localhost:8080/healthz](http://localhost:8080/healthz)
-- [http://localhost:8080/metrics](http://localhost:8080/metrics)
-
-## Quick answers
-
-### Do I need to put my API key into Cencurity Engine?
-
-No, usually not.
-
-The usual setup is:
-
-- API key stays in your IDE or client
-- Cencurity Engine forwards that auth header upstream
-
-### What do most users actually do?
-
-Most users only do this:
-
-```powershell
-go run ./cmd/cast serve --listen :8080 --upstream https://api.openai.com --policy .\cast.rules.example.json
-```
-
-Then they change their IDE base URL to:
-
-```text
-http://localhost:8080
-```
-
-That is the main user flow.
 
 ## Product overview
 
@@ -160,18 +122,6 @@ The point is that CAST protects a different moment: **while code is being genera
 | `confidence` | confidence score | `high` |
 | `action` | enforcement result | `block` |
 | `evidence` | matched evidence snippet | `eval(user_input)` |
-
-## What this tool does
-
-Cencurity Engine checks model output while it is being generated.
-
-That matters because unsafe code can appear before it is ever pasted into a file.
-
-## Simple examples
-
-- unsafe secret in output → `redact`
-- dangerous code like `eval(...)` → `block`
-- normal code output → `allow`
 
 ## If you want to test with curl
 
